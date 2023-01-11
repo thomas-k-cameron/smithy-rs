@@ -111,7 +111,11 @@ impl From<u64> for Document {
 
 impl From<i64> for Document {
     fn from(value: i64) -> Self {
-        Document::Number(Number::NegInt(value))
+        if value == 0 {
+            Document::Number(Number::PosInt(0))
+        } else {
+            Document::Number(Number::NegInt(value))
+        }
     }
 }
 
