@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#[allow(unused)]
+mod constrained;
 #[allow(dead_code)]
 mod ec2_query_errors;
 #[allow(dead_code)]
@@ -13,9 +15,9 @@ mod json_errors;
 mod rest_xml_unwrapped_errors;
 #[allow(unused)]
 mod rest_xml_wrapped_errors;
-#[allow(unused)]
-mod server_operation_handler_trait;
 
+#[allow(unused)]
+mod endpoint_lib;
 // This test is outside of uuid.rs to enable copying the entirety of uuid.rs into the SDK without
 // requiring a proptest dependency
 #[cfg(test)]

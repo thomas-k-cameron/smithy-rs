@@ -5,28 +5,33 @@
 
 package software.amazon.smithy.rustsdk
 
-import software.amazon.smithy.rust.codegen.smithy.ClientCodegenContext
-import software.amazon.smithy.rust.codegen.smithy.customizations.DocsRsMetadataDecorator
-import software.amazon.smithy.rust.codegen.smithy.customizations.DocsRsMetadataSettings
-import software.amazon.smithy.rust.codegen.smithy.customizations.RetryConfigDecorator
-import software.amazon.smithy.rust.codegen.smithy.customizations.SleepImplDecorator
-import software.amazon.smithy.rust.codegen.smithy.customizations.TimeoutConfigDecorator
-import software.amazon.smithy.rust.codegen.smithy.customize.CombinedCodegenDecorator
+import software.amazon.smithy.rust.codegen.client.smithy.customizations.DocsRsMetadataDecorator
+import software.amazon.smithy.rust.codegen.client.smithy.customizations.DocsRsMetadataSettings
+import software.amazon.smithy.rust.codegen.client.smithy.customize.ClientCodegenDecorator
+import software.amazon.smithy.rust.codegen.client.smithy.customize.CombinedClientCodegenDecorator
 import software.amazon.smithy.rustsdk.customize.apigateway.ApiGatewayDecorator
 import software.amazon.smithy.rustsdk.customize.auth.DisabledAuthDecorator
 import software.amazon.smithy.rustsdk.customize.ec2.Ec2Decorator
 import software.amazon.smithy.rustsdk.customize.glacier.GlacierDecorator
 import software.amazon.smithy.rustsdk.customize.route53.Route53Decorator
 import software.amazon.smithy.rustsdk.customize.s3.S3Decorator
+import software.amazon.smithy.rustsdk.customize.s3control.S3ControlDecorator
+import software.amazon.smithy.rustsdk.customize.sts.STSDecorator
+import software.amazon.smithy.rustsdk.endpoints.AwsEndpointDecorator
+import software.amazon.smithy.rustsdk.endpoints.AwsEndpointsStdLib
+import software.amazon.smithy.rustsdk.endpoints.OperationInputTestDecorator
 
-val DECORATORS = listOf(
+val DECORATORS: List<ClientCodegenDecorator> = listOf(
     // General AWS Decorators
+    CredentialsCacheDecorator(),
     CredentialsProviderDecorator(),
     RegionDecorator(),
     AwsEndpointDecorator(),
     UserAgentDecorator(),
     SigV4SigningDecorator(),
-    RetryPolicyDecorator(),
+    HttpRequestChecksumDecorator(),
+    HttpResponseChecksumDecorator(),
+    RetryClassifierDecorator(),
     IntegrationTestDecorator(),
     AwsFluentClientDecorator(),
     CrateLicenseDecorator(),
@@ -34,25 +39,27 @@ val DECORATORS = listOf(
     ServiceConfigDecorator(),
     AwsPresigningDecorator(),
     AwsReadmeDecorator(),
-
-    // Smithy specific decorators
-    RetryConfigDecorator(),
-    SleepImplDecorator(),
-    TimeoutConfigDecorator(),
+    HttpConnectorDecorator(),
+    AwsEndpointsStdLib(),
+    *PromotedBuiltInsDecorators,
+    GenericSmithySdkConfigSettings(),
+    OperationInputTestDecorator(),
 
     // Service specific decorators
-    DisabledAuthDecorator(),
     ApiGatewayDecorator(),
-    S3Decorator(),
+    DisabledAuthDecorator(),
     Ec2Decorator(),
     GlacierDecorator(),
     Route53Decorator(),
+    S3Decorator(),
+    S3ControlDecorator(),
+    STSDecorator(),
 
     // Only build docs-rs for linux to reduce load on docs.rs
-    DocsRsMetadataDecorator(DocsRsMetadataSettings(targets = listOf("x86_64-unknown-linux-gnu"), allFeatures = true))
+    DocsRsMetadataDecorator(DocsRsMetadataSettings(targets = listOf("x86_64-unknown-linux-gnu"), allFeatures = true)),
 )
 
-class AwsCodegenDecorator : CombinedCodegenDecorator<ClientCodegenContext>(DECORATORS) {
+class AwsCodegenDecorator : CombinedClientCodegenDecorator(DECORATORS) {
     override val name: String = "AwsSdkCodegenDecorator"
     override val order: Byte = -1
 }

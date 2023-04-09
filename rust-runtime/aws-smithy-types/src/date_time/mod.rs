@@ -5,6 +5,7 @@
 
 //! DateTime type for representing Smithy timestamps.
 
+use crate::date_time::format::DateTimeParseErrorKind;
 use num_integer::div_mod_floor;
 use num_integer::Integer;
 use std::convert::TryFrom;
@@ -14,7 +15,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+#[cfg(all(test, aws_sdk_unstable, feature = "deserialize"))]
+mod de;
 mod format;
+#[cfg(all(test, aws_sdk_unstable, feature = "serialize"))]
+mod ser;
+
 pub use self::format::DateTimeFormatError;
 pub use self::format::DateTimeParseError;
 
@@ -46,7 +52,7 @@ const NANOS_PER_SECOND_U32: u32 = 1_000_000_000;
 /// The [`aws-smithy-types-convert`](https://crates.io/crates/aws-smithy-types-convert) crate
 /// can be used for conversions to/from other libraries, such as
 /// [`time`](https://crates.io/crates/time) or [`chrono`](https://crates.io/crates/chrono).
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct DateTime {
     seconds: i64,
     subsecond_nanos: u32,
@@ -209,7 +215,7 @@ impl DateTime {
             Format::DateTime => format::rfc3339::read(s)?,
             Format::HttpDate => format::http_date::read(s)?,
             Format::EpochSeconds => {
-                let split_point = s.find(delim).unwrap_or_else(|| s.len());
+                let split_point = s.find(delim).unwrap_or(s.len());
                 let (s, rest) = s.split_at(split_point);
                 (Self::from_str(s, format)?, rest)
             }
@@ -219,9 +225,7 @@ impl DateTime {
         } else if next.starts_with(delim) {
             Ok((inst, &next[1..]))
         } else {
-            Err(DateTimeParseError::Invalid(
-                "didn't find expected delimiter".into(),
-            ))
+            Err(DateTimeParseErrorKind::Invalid("didn't find expected delimiter".into()).into())
         }
     }
 
@@ -322,7 +326,6 @@ pub enum Format {
     /// Number of seconds since the Unix epoch formatted as a floating point.
     EpochSeconds,
 }
-
 #[cfg(test)]
 mod test {
     use crate::date_time::Format;
@@ -526,6 +529,8 @@ mod test {
         assert!(DateTime::from_nanos(10_000_000_000_000_000_000_999_999_999_i128).is_err());
     }
 
+    // TODO(https://github.com/awslabs/smithy-rs/issues/1857)
+    #[cfg(not(any(target_arch = "powerpc", target_arch = "x86")))]
     #[test]
     fn system_time_conversions() {
         // Check agreement
@@ -542,5 +547,41 @@ mod test {
             SystemTime::from(off_date_time),
             SystemTime::try_from(date_time).unwrap()
         );
+    }
+
+    #[cfg(all(test, aws_sdk_unstable, feature = "deserialize", feature = "serialize"))]
+    #[test]
+    fn human_readable_datetime() {
+        use serde::{Deserialize, Serialize};
+
+        let datetime = DateTime::from_secs(1576540098);
+        #[derive(Serialize, Deserialize, PartialEq)]
+        struct Test {
+            datetime: DateTime,
+        }
+        let datetime_json = r#"{"datetime":"2019-12-16T23:48:18Z"}"#;
+        assert!(serde_json::to_string(&Test { datetime }).ok() == Some(datetime_json.to_string()));
+
+        let test = serde_json::from_str::<Test>(&datetime_json).ok();
+        assert!(test.is_some());
+        assert!(test.unwrap().datetime == datetime);
+    }
+
+    /// checks that they are serialized into tuples
+    #[cfg(all(test, aws_sdk_unstable, feature = "deserialize", feature = "serialize"))]
+    #[test]
+    fn not_human_readable_datetime() {
+        let cbor = ciborium::value::Value::Array(vec![
+            ciborium::value::Value::Integer(1576540098i64.into()),
+            ciborium::value::Value::Integer(0u32.into()),
+        ]);
+        let datetime = DateTime::from_secs(1576540098);
+
+        let mut buf1 = vec![];
+        let mut buf2 = vec![];
+        let res1 = ciborium::ser::into_writer(&datetime, &mut buf1);
+        let res2 = ciborium::ser::into_writer(&cbor, &mut buf2);
+        assert!(res1.is_ok() && res2.is_ok());
+        assert!(buf1 == buf2, "{:#?}", (buf1, buf2));
     }
 }
