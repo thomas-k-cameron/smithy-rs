@@ -1,0 +1,1 @@
+aws batch submit-job --job-name "Smithy-rs Compile Time Benchmark" --job-queue smithy-rs-compiletime-benchmark --job-definition smithy-rs-compiletime-benchmark-v1:1 --region us-east-1 --output json
