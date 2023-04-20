@@ -260,13 +260,13 @@ fun Project.registerCargoCommandsTasks(
         workingDir(outputDir)
         environment("RUSTDOCFLAGS", defaultRustDocFlags)
         environment("RUSTFLAGS", "--cfg aws_sdk_unstable")
-        commandLine("cargo", "doc", "--no-deps", "--document-private-items", "--all-features")
+        commandLine("cargo", "doc", "--no-deps", "--document-private-items")
     }
 
     this.tasks.register<Exec>(Cargo.CLIPPY.toString) {
         dependsOn(dependentTasks)
         workingDir(outputDir)
         environment("RUSTFLAGS", "--cfg aws_sdk_unstable")
-        commandLine("cargo", "clippy", "--all-features")
+        commandLine("cargo", "clippy")
     }
 }
