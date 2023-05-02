@@ -14,5 +14,8 @@ cargo tree -d --edges normal --all-features
 # checks whether the features are properly feature-gated
 res=$(cargo tree -e no-dev | grep serde) 
 if [ "$res" != "" ]; then
+    echo "FAILED"
+    echo "it printed serde"
+    echo "$res"
     exit 1
 fi
