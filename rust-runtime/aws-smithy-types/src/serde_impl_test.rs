@@ -4,16 +4,15 @@
  */
 
 use std::{env::current_dir, path::PathBuf, process::Command, str::FromStr};
-mod blob;
 
 #[derive(Debug)]
-pub(crate) enum Target {
+enum Target {
     Ser,
     De,
 }
 
 // create directory and files for testing
-pub(crate) fn create_cargo_dir(datatype: &str, target: Target) -> PathBuf {
+fn create_cargo_dir(datatype: &str, target: Target) -> PathBuf {
     let base_path = PathBuf::from_str("/tmp/smithy-rust-test/")
         .unwrap()
         .join(format!("{target:#?}"))
@@ -26,7 +25,7 @@ pub(crate) fn create_cargo_dir(datatype: &str, target: Target) -> PathBuf {
 
     // write cargo
     {
-        let cargo = include_str!("../../test_data/template/Cargo.toml").replace(
+        let cargo = include_str!("../test_data/template/Cargo.toml").replace(
             r#"aws-smithy-types = { path = "./" }"#,
             &format!(
                 "aws-smithy-types = {{ path = {:#?} }}",
@@ -37,8 +36,8 @@ pub(crate) fn create_cargo_dir(datatype: &str, target: Target) -> PathBuf {
     };
 
     // write main.rs
-    let ser = include_str!("../../test_data/template/ser");
-    let deser = include_str!("../../test_data/template/deser");
+    let ser = include_str!("../test_data/template/ser");
+    let deser = include_str!("../test_data/template/deser");
     let place_holder = "$PLACE_HOLDER$";
     let contents = match target {
         Target::De => deser.replace(place_holder, datatype),
@@ -58,7 +57,7 @@ pub(crate) fn create_cargo_dir(datatype: &str, target: Target) -> PathBuf {
     base_path
 }
 
-pub(crate) fn ser_test(cargo_project_path: &PathBuf) {
+fn ser_test(cargo_project_path: &PathBuf) {
     // runs cargo check --all-features without "--cfg aws_sdk_unstable" enabled.
     // the code that it compiles require serialization feature.
     // it is not expected to compile.
@@ -141,7 +140,7 @@ pub(crate) fn ser_test(cargo_project_path: &PathBuf) {
     assert_eq!(is_success, false);
 }
 
-pub(crate) fn de_test(cargo_project_path: &PathBuf) {
+fn de_test(cargo_project_path: &PathBuf) {
     // runs cargo check --all-features without "--cfg aws_sdk_unstable" enabled.
     // the code that it compiles require de-serialization feature.
     // it is not expected to compile.
@@ -222,4 +221,20 @@ pub(crate) fn de_test(cargo_project_path: &PathBuf) {
 
     let is_success = child.unwrap().wait().unwrap().success();
     assert_eq!(is_success, true);
+}
+
+/// Tests whether de-serialization feature for blob is properly feature gated
+#[test]
+fn feature_gate_test_for_blob_deserialization() {
+    // create files
+    let cargo_project_path = create_cargo_dir("Blob", Target::De);
+    de_test(&cargo_project_path);
+}
+
+/// Tests whether serialization feature for blob is properly feature gated
+#[test]
+fn feature_gate_test_for_blob_serialization() {
+    // create files
+    let cargo_project_path = create_cargo_dir("Blob", Target::Ser);
+    ser_test(&cargo_project_path);
 }
