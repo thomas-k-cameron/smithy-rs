@@ -12,4 +12,7 @@ echo "### Checking for duplicate dependency versions in the normal dependency gr
 cargo tree -d --edges normal --all-features
 
 # checks whether the features are properly feature-gated
-cargo tree -e no-dev | grep serde 
+res=$(cargo tree -e no-dev | grep serde) 
+if [ "$res" != "" ]; then
+    exit 1
+fi
