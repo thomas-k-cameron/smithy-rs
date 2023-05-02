@@ -6,9 +6,6 @@
 use std::{env::current_dir, path::PathBuf, process::Command, str::FromStr};
 mod blob;
 
-
-
-
 #[derive(Debug)]
 pub(crate) enum Target {
     Ser,
