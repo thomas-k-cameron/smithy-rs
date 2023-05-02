@@ -10,4 +10,6 @@ set -e
 
 echo "### Checking for duplicate dependency versions in the normal dependency graph with all features enabled"
 cargo tree -d --edges normal --all-features
-cargo tree -e dev | grep serde
+
+# checks whether the features are properly feature-gated
+cargo tree -e no-dev | grep serde 
