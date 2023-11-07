@@ -67,7 +67,7 @@ pub enum ResponseRejection {
     /// `httpHeader` or `httpPrefixHeaders`.
     /// Used when failing to serialize an `httpPayload`-bound struct into an HTTP response body.
     #[error("error building HTTP response: {0}")]
-    Build(#[from] aws_smithy_http::operation::error::BuildError),
+    Build(#[from] aws_smithy_types::error::operation::BuildError),
 
     /// Used when failing to serialize a struct into a `String` for the JSON-encoded HTTP response
     /// body.
@@ -76,7 +76,7 @@ pub enum ResponseRejection {
     /// supplied timestamp is outside of the valid range when formatting using RFC-3339, i.e. a
     /// date outside the `0001-01-01T00:00:00.000Z`-`9999-12-31T23:59:59.999Z` range is supplied.
     #[error("error serializing JSON-encoded body: {0}")]
-    Serialization(#[from] aws_smithy_http::operation::error::SerializationError),
+    Serialization(#[from] aws_smithy_types::error::operation::SerializationError),
 
     /// Used when consuming an [`http::response::Builder`] into the constructed [`http::Response`]
     /// when calling [`http::response::Builder::body`].
@@ -115,6 +115,8 @@ pub enum RequestRejection {
     NotAcceptable,
 
     /// Used when checking the `Content-Type` header.
+    /// This is bubbled up in the generated SDK when calling
+    /// [`crate::protocol::content_type_header_classifier`] in `from_request`.
     #[error("expected `Content-Type` header not found: {0}")]
     MissingContentType(#[from] MissingContentTypeReason),
 

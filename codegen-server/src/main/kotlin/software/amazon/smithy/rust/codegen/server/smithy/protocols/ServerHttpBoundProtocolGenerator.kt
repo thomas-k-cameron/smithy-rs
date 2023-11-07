@@ -57,7 +57,6 @@ import software.amazon.smithy.rust.codegen.core.smithy.protocols.HttpBoundProtoc
 import software.amazon.smithy.rust.codegen.core.smithy.protocols.HttpLocation
 import software.amazon.smithy.rust.codegen.core.smithy.protocols.Protocol
 import software.amazon.smithy.rust.codegen.core.smithy.protocols.ProtocolFunctions
-import software.amazon.smithy.rust.codegen.core.smithy.protocols.RestJson
 import software.amazon.smithy.rust.codegen.core.smithy.protocols.parse.StructuredDataParserGenerator
 import software.amazon.smithy.rust.codegen.core.smithy.traits.SyntheticInputTrait
 import software.amazon.smithy.rust.codegen.core.smithy.transformers.operationErrors
@@ -82,11 +81,28 @@ import software.amazon.smithy.rust.codegen.server.smithy.generators.protocol.Ser
 import software.amazon.smithy.rust.codegen.server.smithy.generators.serverBuilderSymbol
 import java.util.logging.Logger
 
+data class StreamPayloadSerializerParams(
+    val codegenContext: ServerCodegenContext,
+    val payloadGenerator: ServerHttpBoundProtocolPayloadGenerator,
+    val shapeName: String,
+    val shape: OperationShape,
+)
+
 /**
  * Class describing a ServerHttpBoundProtocol section that can be used in a customization.
  */
 sealed class ServerHttpBoundProtocolSection(name: String) : Section(name) {
     data class AfterTimestampDeserializedMember(val shape: MemberShape) : ServerHttpBoundProtocolSection("AfterTimestampDeserializedMember")
+
+    /**
+     * Represent a section for rendering the serialized stream payload.
+     *
+     * If the payload does not implement the `futures_core::stream::Stream`, which is the case for
+     * `aws_smithy_types::byte_stream::ByteStream`, the section needs to be overridden and renders a new-type wrapper
+     * around the payload to enable the `Stream` trait.
+     */
+    data class WrapStreamPayload(val params: StreamPayloadSerializerParams) :
+        ServerHttpBoundProtocolSection("WrapStreamPayload")
 }
 
 /**
@@ -173,8 +189,8 @@ class ServerHttpBoundProtocolTraitImplGenerator(
         "OnceCell" to RuntimeType.OnceCell,
         "PercentEncoding" to RuntimeType.PercentEncoding,
         "Regex" to RuntimeType.Regex,
-        "SmithyHttp" to RuntimeType.smithyHttp(runtimeConfig),
         "SmithyHttpServer" to ServerCargoDependency.smithyHttpServer(runtimeConfig).toType(),
+        "SmithyTypes" to RuntimeType.smithyTypes(runtimeConfig),
         "RuntimeError" to protocol.runtimeError(runtimeConfig),
         "RequestRejection" to protocol.requestRejection(runtimeConfig),
         "ResponseRejection" to protocol.responseRejection(runtimeConfig),
@@ -234,6 +250,11 @@ class ServerHttpBoundProtocolTraitImplGenerator(
                 rustTemplate(init, *codegenScope)
             }
         }
+        // This checks for the expected `Content-Type` header if the `@httpPayload` trait is present, as dictated by
+        // the core Smithy library, which _does not_ require deserializing the payload.
+        // If no members have `@httpPayload`, the expected `Content-Type` header as dictated _by the protocol_ is
+        // checked later on for non-streaming operations, in `serverRenderShapeParser`: that check _does_ require at
+        // least buffering the entire payload, since the check must only be performed if the payload is empty.
         val verifyRequestContentTypeHeader = writable {
             operationShape
                 .inputShape(model)
@@ -242,11 +263,15 @@ class ServerHttpBoundProtocolTraitImplGenerator(
                 ?.let { payload ->
                     val target = model.expectShape(payload.target)
                     if (!target.isBlobShape || target.hasTrait<MediaTypeTrait>()) {
-                        val expectedRequestContentType = httpBindingResolver.requestContentType(operationShape)
-                            ?.let { "Some(${it.dq()})" } ?: "None"
+                        // `null` is only returned by Smithy when there are no members, but we know there's at least
+                        // the one with `@httpPayload`, so `!!` is safe here.
+                        val expectedRequestContentType = httpBindingResolver.requestContentType(operationShape)!!
                         rustTemplate(
                             """
-                            #{SmithyHttpServer}::protocol::content_type_header_classifier(request.headers(), $expectedRequestContentType)?;
+                            #{SmithyHttpServer}::protocol::content_type_header_classifier(
+                                request.headers(),
+                                Some("$expectedRequestContentType"),
+                            )?;
                             """,
                             *codegenScope,
                         )
@@ -532,7 +557,18 @@ class ServerHttpBoundProtocolTraitImplGenerator(
         operationShape.outputShape(model).findStreamingMember(model)?.let {
             val payloadGenerator = ServerHttpBoundProtocolPayloadGenerator(codegenContext, protocol)
             withBlockTemplate("let body = #{SmithyHttpServer}::body::boxed(#{SmithyHttpServer}::body::Body::wrap_stream(", "));", *codegenScope) {
-                payloadGenerator.generatePayload(this, "output", operationShape)
+                for (customization in customizations) {
+                    customization.section(
+                        ServerHttpBoundProtocolSection.WrapStreamPayload(
+                            StreamPayloadSerializerParams(
+                                codegenContext,
+                                payloadGenerator,
+                                "output",
+                                operationShape,
+                            ),
+                        ),
+                    )(this)
+                }
             }
         } ?: run {
             val payloadGenerator = ServerHttpBoundProtocolPayloadGenerator(codegenContext, protocol)
@@ -689,30 +725,25 @@ class ServerHttpBoundProtocolTraitImplGenerator(
         rust("let (parts, body) = request.into_parts();")
         val parser = structuredDataParser.serverInputParser(operationShape)
         val noInputs = model.expectShape(operationShape.inputShape).expectTrait<SyntheticInputTrait>().originalId == null
+
         if (parser != null) {
-            rustTemplate(
-                """
-                let bytes = #{Hyper}::body::to_bytes(body).await?;
-                if !bytes.is_empty() {
-                """,
-                *codegenScope,
-            )
-            if (protocol is RestJson) {
+            // `null` is only returned by Smithy when there are no members, but we know there's at least one, since
+            // there's something to parse (i.e. `parser != null`), so `!!` is safe here.
+            val expectedRequestContentType = httpBindingResolver.requestContentType(operationShape)!!
+            rustTemplate("let bytes = #{Hyper}::body::to_bytes(body).await?;", *codegenScope)
+            rustBlock("if !bytes.is_empty()") {
                 rustTemplate(
                     """
-                    #{SmithyHttpServer}::protocol::content_type_header_classifier(&parts.headers, Some("application/json"))?;
+                    #{SmithyHttpServer}::protocol::content_type_header_classifier(
+                        &parts.headers,
+                        Some("$expectedRequestContentType"),
+                    )?;
+                    input = #{parser}(bytes.as_ref(), input)?;
                     """,
                     *codegenScope,
+                    "parser" to parser,
                 )
             }
-            rustTemplate(
-                """
-                input = #{parser}(bytes.as_ref(), input)?;
-                }
-                """,
-                *codegenScope,
-                "parser" to parser,
-            )
         }
         for (binding in bindings) {
             val member = binding.member
@@ -1238,7 +1269,7 @@ class ServerHttpBoundProtocolTraitImplGenerator(
 
     private fun streamingBodyTraitBounds(operationShape: OperationShape) =
         if (operationShape.inputShape(model).hasStreamingMember(model)) {
-            "\n B: Into<#{SmithyHttp}::byte_stream::ByteStream>,"
+            "\n B: Into<#{SmithyTypes}::byte_stream::ByteStream>,"
         } else {
             ""
         }
